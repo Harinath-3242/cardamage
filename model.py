@@ -1,128 +1,132 @@
+import streamlit as st
 import numpy as np
-import tensorflow as tf
+import keras
+import numpy as np
+import keras
+import keras.utils as im
+import matplotlib.pyplot as plt
+from keras.models import Model
+from keras import models, layers
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from keras.applications.inception_v3 import preprocess_input
 from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPooling2D, Input
 from tensorflow.keras.models import Model
 from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.models import load_model
+import tensorflow as tf
+from PIL import Image
+import pickle
 
-# ------------------------
-# Data Generators
-# ------------------------
-train_datagen = ImageDataGenerator(
-    rescale=1./255,
-    rotation_range=20,
-    width_shift_range=0.2,
-    height_shift_range=0.2,
-    shear_range=0.2,
-    zoom_range=0.2,
-    horizontal_flip=True,
-    vertical_flip=True,
-    brightness_range=[0.8, 1.2],
-    channel_shift_range=50
-)
 
-test_datagen = ImageDataGenerator(rescale=1./255)
 
-# NOTE: For multi-task learning, your dataset should include:
-#   - class labels (Dent, Scratch, etc.)
-#   - damage percentage (0-100) in a CSV or numpy array
-# Example assumes you already have these aligned.
 
-training_set = train_datagen.flow_from_directory(
-    r"F:\Project\Dataset\training",
-    target_size=(224, 224),
-    batch_size=32,
-    class_mode='categorical',
-    shuffle=True
-)
+def predict(model, image):
+    
+    image = image.convert('RGB')  
+    image = image.resize((224, 224))
+    x = im.img_to_array(image)
+    x = np.expand_dims(x, axis=0)
+    img_data = preprocess_input(x)
 
-testing_set = test_datagen.flow_from_directory(
-    r"F:\Project\Dataset\testing",
-    target_size=(224, 224),
-    batch_size=32,
-    class_mode='categorical',
-    shuffle=False
-)
 
-# ------------------------
-# Model Architecture
-# ------------------------
-base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+    output = np.argmax(model.predict(img_data), axis=1)
 
-for layer in base_model.layers:
-    layer.trainable = False
+    
+    index = ['Minor', 'Moderate', 'Severe', 'Good']
+    result = index[output[0]]
 
-x = base_model.output
-x = Conv2D(64, (3, 3), activation='relu', padding='same')(x)
-x = MaxPooling2D((2, 2))(x)
-x = Flatten()(x)
-x = Dense(512, activation='relu')(x)
-x = Dropout(0.5)(x)
+    return result
 
-# Output 1: Damage Type (classification)
-damage_type = Dense(len(training_set.class_indices), activation='softmax', name="damage_type")(x)
 
-# Output 2: Damage Percentage (regression)
-damage_percent = Dense(1, activation='linear', name="damage_percent")(x)
 
-# Combine into multi-output model
-model = Model(inputs=base_model.input, outputs=[damage_type, damage_percent])
 
-# ------------------------
-# Compile Model
-# ------------------------
-model.compile(
-    optimizer='adam',
-    loss={
-        "damage_type": "categorical_crossentropy",
-        "damage_percent": "mse"   # mean squared error for regression
-    },
-    metrics={
-        "damage_type": "accuracy",
-        "damage_percent": "mae"   # mean absolute error
-    }
-)
+def main():
+    st.title("Car Damage Severity Assessmnent System")
 
-model.summary()
+    
+    page = st.sidebar.selectbox("Select a page", ["Model Prediction", "About the Project"])
 
-# ------------------------
-# Training (Example)
-# ------------------------
-checkpoint = ModelCheckpoint(
-    'best_multitask_model.weights.h5',
-    monitor='val_damage_type_accuracy',
-    verbose=1,
-    save_best_only=True,
-    mode='max',
-    save_weights_only=True
-)
+    if page == "Model Prediction":
+        model_prediction_page()
+    elif page == "About the Project":
+        about_model_page()
 
-# NOTE: For multi-output, you need to provide both y_class and y_reg values.
-# Example: model.fit(x_train, {"damage_type": y_classes, "damage_percent": y_percentages}, ...)
 
-# Placeholder fit (replace with your dataset that includes damage % labels)
-# history = model.fit(training_images,
-#                     {"damage_type": y_classes, "damage_percent": y_percentages},
-#                     epochs=50,
-#                     validation_data=(val_images, {"damage_type": y_val_classes, "damage_percent": y_val_percent}),
-#                     callbacks=[checkpoint])
+def model_prediction_page():
+    st.header("Model Prediction")
 
-# ------------------------
-# Prediction Example
-# ------------------------
-from tensorflow.keras.preprocessing import image
+    
+    uploaded_file = st.file_uploader("Choose a photo...", type=["jpg", "jpeg", "png"])
 
-img_path = r"C:\Users\Tushar\Downloads\car.jpg"
-img = image.load_img(img_path, target_size=(224, 224))
-img_array = image.img_to_array(img)
-img_array = np.expand_dims(img_array, axis=0) / 255.0
+    if uploaded_file is not None:
+       
 
-pred_type, pred_percent = model.predict(img_array)
 
-damage_classes = list(training_set.class_indices.keys())
-predicted_class = damage_classes[np.argmax(pred_type)]
-predicted_percentage = float(pred_percent[0][0])
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Uploaded Image", use_column_width=True)
 
-print(f"Predicted Damage Type: {predicted_class}")
-print(f"Estimated Damage Percentage: {predicted_percentage:.2f}%")
+       
+        
+        model = load_model("MobileNet_Model_Final.keras")
+   
+        with st.spinner("Making prediction..."):
+            prediction = predict(model, image)
+
+        st.subheader("Prediction Results")
+        st.write(prediction)
+
+
+    st.markdown("---")
+    
+
+def about_model_page():
+
+
+    st.subheader("Overview")
+    st.write("""
+    This project aims to leverage Deep Learning techniques to assess the severity of car damage from images. The goal is to create an automated system that can quickly and accurately evaluate the extent of damage to a vehicle, assisting insurance companies, repair shops, and car owners in making informed decisions..
+    """)
+
+    st.subheader("Objectives")
+    st.write("""
+    1. **Automated Detection**: Identify and classify car damage from images.
+    2. **Severity Assessment**: Categorize damage into levels (minor, moderate, severe).
+    3. **Efficiency**: Ensure high accuracy and fast processing.
+    """)
+
+    st.subheader("Methodology")
+    st.write("""
+    - **Data Collection**: Images labeled with damage type and severity.
+    - **Preprocessing**: Resize, normalize, and augment images.
+    - **Model Development**: Use Convolutional Neural Networks (CNNs).
+    - **Training & Validation**: Train model on split dataset and evaluate performance.
+    - **Evaluation**: Use accuracy, precision, recall, and F1-score metrics.
+    """)
+
+    st.subheader("Technologies Used")
+    st.write("""
+    - **Framework**: TensorFlow/Keras or PyTorch
+    - **Language**: Python
+    - **Data Processing**: OpenCV, PIL
+    - **Evaluation**: Scikit-learn
+    """)
+
+
+
+    st.subheader("Future Work")
+    st.write("""
+    - **Expand Dataset**: Include more diverse images.
+    - **Real-world Application**: Integrate with industry applications.
+    - **Enhance Model**: Use advanced techniques for better performance.
+    """)
+
+    st.subheader("Conclusion")
+    st.write("""
+    This project demonstrates the potential of deep learning to automate and improve car damage assessments, saving time and resources while ensuring reliable results.
+    """)
+    
+    st.markdown("---")
+    st.write("Developed by G Jayanth")
+
+if __name__ == "__main__":
+    main()
